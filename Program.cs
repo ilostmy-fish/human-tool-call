@@ -8,12 +8,26 @@ internal static class Program
     private const string MutexName = @"Local\HumanToolCall";
 
     [STAThread]
-    private static void Main()
+    private static int Main(string[] args)
     {
+        if (args.Length == 1 && string.Equals(args[0], "--smoke-test", StringComparison.Ordinal))
+        {
+            try
+            {
+                SmokeTest.RunAsync().GetAwaiter().GetResult();
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                try { File.WriteAllText("smoke-test-error.txt", ex.ToString()); } catch { }
+                return 1;
+            }
+        }
+
         using Mutex mutex = new(true, MutexName, out bool createdNew);
         if (!createdNew)
         {
-            return;
+            return 0;
         }
 
         Application.EnableVisualStyles();
@@ -32,7 +46,7 @@ internal static class Program
                 "Human Tool Call",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Error);
-            return;
+            return 1;
         }
 
         try
@@ -94,8 +108,10 @@ internal static class Program
             }
 
             try { backend.StopAsync().GetAwaiter().GetResult(); } catch { }
-            backend.DisposeAsync().AsTask().GetAwaiter().GetResult();
+            try { backend.DisposeAsync().AsTask().GetAwaiter().GetResult(); } catch { }
         }
+
+        return 0;
     }
 }
 
