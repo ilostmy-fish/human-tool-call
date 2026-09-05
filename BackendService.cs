@@ -70,7 +70,7 @@ internal sealed class BackendService : IAsyncDisposable
                     options.ServerInstructions = UserCommunicationTools.ServerInstructions;
                 })
                 .WithHttpTransport(options => options.Stateless = true)
-                .WithTools<UserCommunicationTools>();
+                .WithTools(new UserCommunicationTools(_broker, _config));
 
             WebApplication app = builder.Build();
 
