@@ -160,7 +160,7 @@ internal sealed class TunnelSupervisor : IDisposable
             };
             ManagementScope scope = new(@"\\.\root\cimv2", connectionOptions);
             ObjectQuery query = new("SELECT ProcessId, ExecutablePath, CommandLine FROM Win32_Process WHERE Name='tunnel-client.exe'");
-            EnumerationOptions options = new()
+            System.Management.EnumerationOptions options = new()
             {
                 ReturnImmediately = true,
                 Rewindable = false,

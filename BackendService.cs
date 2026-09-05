@@ -87,7 +87,7 @@ internal sealed class BackendService : IAsyncDisposable
 
                 context.Response.Headers.CacheControl = "no-store";
                 context.Response.Headers.XContentTypeOptions = "nosniff";
-                context.Response.Headers.ReferrerPolicy = "no-referrer";
+                context.Response.Headers["Referrer-Policy"] = "no-referrer";
                 await next(context).ConfigureAwait(false);
             });
 
