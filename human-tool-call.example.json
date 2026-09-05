@@ -1,0 +1,31 @@
+{
+  "startWithWindows": false,
+  "startBackendOnLaunch": false,
+  "startTunnelOnLaunch": false,
+  "openBrowserOnLaunch": false,
+  "stopTunnelOnExit": true,
+  "notifyOnQuestions": true,
+  "notifyOnProgressReports": false,
+  "backend": {
+    "host": "127.0.0.1",
+    "port": 64500,
+    "mcpPath": "/mcp",
+    "interactionTimeoutSeconds": 600,
+    "browserLongPollSeconds": 25,
+    "maxPendingInteractions": 16,
+    "maxQuestionsPerInteraction": 20,
+    "maxRecentProgressReports": 20
+  },
+  "tunnel": {
+    "executablePath": "C:\\tools\\tunnel-client\\tunnel-client.exe",
+    "profile": "human-tool-call",
+    "healthHost": "127.0.0.1",
+    "healthPort": 8082,
+    "processQueryTimeoutMs": 400,
+    "healthTimeoutMs": 400,
+    "processExitTimeoutMs": 2000,
+    "postStartDelayMs": 350,
+    "controlPlaneApiKeyFile": "C:\\tools\\tunnel-client\\control-plane-api-key.dpapi",
+    "controlPlaneApiKeyEnvironmentVariable": "CONTROL_PLANE_API_KEY"
+  }
+}

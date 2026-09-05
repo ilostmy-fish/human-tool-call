@@ -1,0 +1,129 @@
+using Microsoft.Win32;
+using System.Windows.Forms;
+
+namespace HumanToolCall;
+
+internal static class Program
+{
+    private const string MutexName = @"Local\HumanToolCall";
+
+    [STAThread]
+    private static void Main()
+    {
+        using Mutex mutex = new(true, MutexName, out bool createdNew);
+        if (!createdNew)
+        {
+            return;
+        }
+
+        Application.EnableVisualStyles();
+        Application.SetCompatibleTextRenderingDefault(false);
+
+        AppConfig config;
+        string configPath;
+        try
+        {
+            (config, configPath, _) = ConfigLoader.LoadOrCreate();
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(
+                "Human Tool Call could not load its configuration.\n\n" + ex.Message,
+                "Human Tool Call",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error);
+            return;
+        }
+
+        try
+        {
+            StartupManager.Apply(config.StartWithWindows);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(
+                $"Human Tool Call loaded {configPath}, but could not update Windows startup registration.\n\n{ex.Message}",
+                "Human Tool Call",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning);
+        }
+
+        InteractionBroker broker = new(config.Backend);
+        BackendService backend = new(config.Backend, broker);
+        using TunnelSupervisor tunnel = new(config.Tunnel);
+
+        try
+        {
+            if (config.StartBackendOnLaunch)
+            {
+                try
+                {
+                    backend.StartAsync().GetAwaiter().GetResult();
+                }
+                catch
+                {
+                    // The tray will show Backend: Off. The user can retry manually.
+                }
+            }
+
+            if (config.StartTunnelOnLaunch && backend.IsRunning)
+            {
+                try
+                {
+                    tunnel.Start();
+                }
+                catch
+                {
+                    // Status reconciliation in the tray will expose the resulting state.
+                }
+            }
+
+            using TrayApplicationContext context = new(config, backend, tunnel, broker);
+            if (config.OpenBrowserOnLaunch && backend.IsRunning)
+            {
+                context.OpenBrowser();
+            }
+
+            Application.Run(context);
+        }
+        finally
+        {
+            if (config.StopTunnelOnExit)
+            {
+                try { tunnel.Stop(); } catch { }
+            }
+
+            try { backend.StopAsync().GetAwaiter().GetResult(); } catch { }
+            backend.DisposeAsync().AsTask().GetAwaiter().GetResult();
+        }
+    }
+}
+
+internal static class StartupManager
+{
+    private const string RunKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Run";
+    private const string ValueName = "HumanToolCall";
+
+    internal static void Apply(bool enabled)
+    {
+        using RegistryKey? key = Registry.CurrentUser.CreateSubKey(RunKeyPath, writable: true);
+        if (key is null)
+        {
+            throw new InvalidOperationException("Could not open the current user's Windows Run registry key.");
+        }
+
+        if (!enabled)
+        {
+            key.DeleteValue(ValueName, throwOnMissingValue: false);
+            return;
+        }
+
+        string? executable = Environment.ProcessPath;
+        if (string.IsNullOrWhiteSpace(executable))
+        {
+            throw new InvalidOperationException("Windows did not report the current executable path.");
+        }
+
+        key.SetValue(ValueName, $"\"{executable}\"", RegistryValueKind.String);
+    }
+}
