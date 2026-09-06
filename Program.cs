@@ -1,4 +1,9 @@
 using Microsoft.Win32;
+using ModelContextProtocol;
+using ModelContextProtocol.Protocol;
+using ModelContextProtocol.Server;
+using System.Reflection;
+using System.Text.Json;
 using System.Windows.Forms;
 
 namespace HumanToolCall;
@@ -10,18 +15,10 @@ internal static class Program
     [STAThread]
     private static int Main(string[] args)
     {
-        if (args.Length == 1 && string.Equals(args[0], "--smoke-test", StringComparison.Ordinal))
+        if (args.Length == 1 && string.Equals(args[0], "--dump-tools", StringComparison.Ordinal))
         {
-            try
-            {
-                SmokeTest.RunAsync().GetAwaiter().GetResult();
-                return 0;
-            }
-            catch (Exception ex)
-            {
-                try { File.WriteAllText("smoke-test-error.txt", ex.ToString()); } catch { }
-                return 1;
-            }
+            DumpTools();
+            return 0;
         }
 
         using Mutex mutex = new(true, MutexName, out bool createdNew);
@@ -42,8 +39,8 @@ internal static class Program
         catch (Exception ex)
         {
             MessageBox.Show(
-                "Human Tool Call could not load its configuration.\n\n" + ex.Message,
-                "Human Tool Call",
+                "HumanToolCall could not load its configuration.\n\n" + ex.Message,
+                "HumanToolCall",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Error);
             return 1;
@@ -56,8 +53,8 @@ internal static class Program
         catch (Exception ex)
         {
             MessageBox.Show(
-                $"Human Tool Call loaded {configPath}, but could not update Windows startup registration.\n\n{ex.Message}",
-                "Human Tool Call",
+                $"HumanToolCall loaded {configPath}, but could not update Windows startup registration.\n\n{ex.Message}",
+                "HumanToolCall",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Warning);
         }
@@ -104,14 +101,59 @@ internal static class Program
         {
             if (config.StopTunnelOnExit)
             {
-                try { tunnel.Stop(); } catch { }
+                try
+                {
+                    tunnel.Stop();
+                }
+                catch
+                {
+                }
             }
 
-            try { backend.StopAsync().GetAwaiter().GetResult(); } catch { }
-            try { backend.DisposeAsync().AsTask().GetAwaiter().GetResult(); } catch { }
+            try
+            {
+                backend.StopAsync().GetAwaiter().GetResult();
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                backend.DisposeAsync().AsTask().GetAwaiter().GetResult();
+            }
+            catch
+            {
+            }
         }
 
         return 0;
+    }
+
+    private static void DumpTools()
+    {
+        UserCommunicationTools target = new(new InteractionBroker(new BackendConfig()));
+        Tool[] tools = typeof(UserCommunicationTools)
+            .GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.DeclaredOnly)
+            .Where(method => method.GetCustomAttribute<McpServerToolAttribute>() is not null)
+            .OrderBy(method => method.MetadataToken)
+            .Select(method => McpServerTool.Create(method, target).ProtocolTool)
+            .ToArray();
+
+        string outputDirectory = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "testOutputs"));
+        Directory.CreateDirectory(outputDirectory);
+
+        ListToolsResult list = new() { Tools = tools };
+        File.WriteAllText(
+            Path.Combine(outputDirectory, "tools.json"),
+            JsonSerializer.Serialize(list, McpJsonUtilities.DefaultOptions));
+
+        foreach (Tool tool in tools)
+        {
+            File.WriteAllText(
+                Path.Combine(outputDirectory, $"{tool.Name}.json"),
+                JsonSerializer.Serialize(tool, McpJsonUtilities.DefaultOptions));
+        }
     }
 }
 

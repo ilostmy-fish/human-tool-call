@@ -8,3 +8,4 @@ publish/
 *.log
 human-tool-call.json
 *.dpapi
+agentsDoNotInteract/

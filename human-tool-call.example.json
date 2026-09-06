@@ -11,9 +11,7 @@
     "port": 64500,
     "mcpPath": "/mcp",
     "interactionTimeoutSeconds": 600,
-    "browserLongPollSeconds": 25,
     "maxPendingInteractions": 16,
-    "maxQuestionsPerInteraction": 20,
     "maxRecentProgressReports": 20
   },
   "tunnel": {

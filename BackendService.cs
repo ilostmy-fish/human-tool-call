@@ -2,19 +2,23 @@ using System.Net;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Threading.Channels;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using ModelContextProtocol.AspNetCore;
 using ModelContextProtocol.Protocol;
-using ModelContextProtocol.Server;
 
 namespace HumanToolCall;
 
 internal sealed class BackendService : IAsyncDisposable
 {
+    private static readonly JsonSerializerOptions BrowserEventJsonOptions = new(ConfigLoader.JsonOptions)
+    {
+        WriteIndented = false
+    };
+
     private readonly BackendConfig _config;
     private readonly InteractionBroker _broker;
     private readonly string _browserToken = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
@@ -62,15 +66,14 @@ internal sealed class BackendService : IAsyncDisposable
                 {
                     options.ServerInfo = new Implementation
                     {
-                        Name = "human-tool-call",
-                        Version = "0.1.0",
-                        Title = "Human Tool Call",
+                        Name = "HumanToolCall",
+                        Version = "1.0",
+                        Title = "HumanToolCall",
                         Description = "User communication tools for an ongoing ChatGPT workflow."
                     };
-                    options.ServerInstructions = UserCommunicationTools.ServerInstructions;
                 })
                 .WithHttpTransport(options => options.Stateless = true)
-                .WithTools(new UserCommunicationTools(_broker, _config));
+                .WithTools(new UserCommunicationTools(_broker));
 
             WebApplication app = builder.Build();
 
@@ -81,7 +84,8 @@ internal sealed class BackendService : IAsyncDisposable
                     !string.Equals(host, "localhost", StringComparison.OrdinalIgnoreCase))
                 {
                     context.Response.StatusCode = StatusCodes.Status400BadRequest;
-                    await context.Response.WriteAsync("Invalid Host header.", context.RequestAborted).ConfigureAwait(false);
+                    await context.Response.WriteAsync("Invalid Host header.", context.RequestAborted)
+                        .ConfigureAwait(false);
                     return;
                 }
 
@@ -94,35 +98,63 @@ internal sealed class BackendService : IAsyncDisposable
             app.MapGet("/", () => Results.Content(WebUi.Html, "text/html; charset=utf-8"));
             app.MapGet("/healthz", () => Results.Text("live", "text/plain"));
 
-            app.MapGet("/api/state", (HttpContext context) =>
+            app.MapGet("/api/events", async (HttpContext context) =>
             {
                 if (!AuthorizeBrowser(context))
                 {
-                    return Results.Unauthorized();
+                    context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                    return;
                 }
 
-                return Results.Json(_broker.Snapshot(), ConfigLoader.JsonOptions);
-            });
-
-            app.MapGet("/api/poll", async (HttpContext context) =>
-            {
-                if (!AuthorizeBrowser(context))
+                Channel<object> events = Channel.CreateUnbounded<object>(new UnboundedChannelOptions
                 {
-                    return Results.Unauthorized();
-                }
+                    SingleReader = true,
+                    SingleWriter = false
+                });
 
-                long since = 0;
-                if (long.TryParse(context.Request.Query["version"], out long parsed))
+                void interactionAdded(PendingInteractionView interaction) =>
+                    events.Writer.TryWrite(new { type = "interactionAdded", interaction });
+
+                void interactionRemoved(string interactionId) =>
+                    events.Writer.TryWrite(new { type = "interactionRemoved", interactionId });
+
+                void progressAdded(ProgressReportView report) =>
+                    events.Writer.TryWrite(new { type = "progressAdded", report });
+
+                void progressRemoved(string reportId) =>
+                    events.Writer.TryWrite(new { type = "progressRemoved", reportId });
+
+                _broker.interactionAdded += interactionAdded;
+                _broker.interactionRemoved += interactionRemoved;
+                _broker.progressAdded += progressAdded;
+                _broker.progressRemoved += progressRemoved;
+
+                context.Response.ContentType = "application/x-ndjson; charset=utf-8";
+
+                try
                 {
-                    since = parsed;
+                    await WriteBrowserEventAsync(
+                        context,
+                        new { type = "sync", snapshot = _broker.Snapshot() },
+                        context.RequestAborted).ConfigureAwait(false);
+
+                    await foreach (object browserEvent in events.Reader.ReadAllAsync(context.RequestAborted))
+                    {
+                        await WriteBrowserEventAsync(context, browserEvent, context.RequestAborted)
+                            .ConfigureAwait(false);
+                    }
                 }
-
-                await _broker.WaitForChangeAsync(
-                    since,
-                    TimeSpan.FromSeconds(_config.BrowserLongPollSeconds),
-                    context.RequestAborted).ConfigureAwait(false);
-
-                return Results.Json(_broker.Snapshot(), ConfigLoader.JsonOptions);
+                catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested)
+                {
+                }
+                finally
+                {
+                    _broker.interactionAdded -= interactionAdded;
+                    _broker.interactionRemoved -= interactionRemoved;
+                    _broker.progressAdded -= progressAdded;
+                    _broker.progressRemoved -= progressRemoved;
+                    events.Writer.TryComplete();
+                }
             });
 
             app.MapPost("/api/interactions/{id}/answer", async (HttpContext context, string id) =>
@@ -141,7 +173,7 @@ internal sealed class BackendService : IAsyncDisposable
                     return Results.BadRequest(new { error = "Missing request body." });
                 }
 
-                return _broker.SubmitAnswers(id, request.Answers)
+                return _broker.SubmitAnswer(id, request.answer)
                     ? Results.Json(new { status = "received" }, ConfigLoader.JsonOptions)
                     : Results.NotFound(new { error = "The interaction no longer exists or has already completed." });
             });
@@ -172,6 +204,7 @@ internal sealed class BackendService : IAsyncDisposable
                 await _app.DisposeAsync().ConfigureAwait(false);
                 _app = null;
             }
+
             throw;
         }
         finally
@@ -191,7 +224,7 @@ internal sealed class BackendService : IAsyncDisposable
                 return;
             }
 
-            _broker.CancelAll("The local Human Tool Call backend was stopped before the interaction completed.");
+            _broker.CancelAll("The local HumanToolCall backend was stopped before the interaction completed.");
 
             WebApplication app = _app;
             _app = null;
@@ -233,6 +266,14 @@ internal sealed class BackendService : IAsyncDisposable
             CryptographicOperations.ZeroMemory(actualBytes);
             CryptographicOperations.ZeroMemory(expectedBytes);
         }
+    }
+
+    private static async Task WriteBrowserEventAsync(HttpContext context, object browserEvent,
+        CancellationToken cancellationToken)
+    {
+        string json = JsonSerializer.Serialize(browserEvent, browserEvent.GetType(), BrowserEventJsonOptions);
+        await context.Response.WriteAsync(json + "\n", cancellationToken).ConfigureAwait(false);
+        await context.Response.Body.FlushAsync(cancellationToken).ConfigureAwait(false);
     }
 
     public async ValueTask DisposeAsync()

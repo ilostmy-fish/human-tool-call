@@ -75,14 +75,14 @@ internal sealed class TrayApplicationContext : ApplicationContext
         _trayIcon = new NotifyIcon
         {
             Icon = SystemIcons.Application,
-            Text = "Human Tool Call",
+            Text = "HumanToolCall",
             ContextMenuStrip = _menu,
             Visible = true
         };
         _trayIcon.DoubleClick += OpenUiItem_Click;
 
-        _broker.InteractionAdded += Broker_InteractionAdded;
-        _broker.ProgressAdded += Broker_ProgressAdded;
+        _broker.interactionAdded += brokerInteractionAdded;
+        _broker.progressAdded += brokerProgressAdded;
 
         Publish(null);
         _ = RefreshStatusAsync(countAction: false);
@@ -137,7 +137,8 @@ internal sealed class TrayApplicationContext : ApplicationContext
     {
         if (!_backend.IsRunning)
         {
-            ShowMessage("Backend is off", "Start Backend first. The configured tunnel forwards to this local MCP server.", ToolTipIcon.Info);
+            ShowMessage("Backend is off",
+                "Start Backend first. The configured tunnel forwards to this local MCP server.", ToolTipIcon.Info);
             return;
         }
 
@@ -192,7 +193,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         catch (Exception ex)
         {
             status = new TunnelStatus { State = TunnelState.Error, Details = ex.Message };
-            ShowMessage("Human Tool Call", ex.Message, ToolTipIcon.Error);
+            ShowMessage("HumanToolCall", ex.Message, ToolTipIcon.Error);
         }
         finally
         {
@@ -225,32 +226,33 @@ internal sealed class TrayApplicationContext : ApplicationContext
             {
                 IncrementActions();
             }
+
             SetBusy(false);
             Publish(status);
         }
     }
 
-    private void Broker_InteractionAdded(PendingInteractionView interaction)
+    private void brokerInteractionAdded(PendingInteractionView interaction)
     {
         DispatchToUi(() =>
         {
             Publish(null);
             if (_config.NotifyOnQuestions)
             {
-                string title = interaction.Kind == "choose_path" ? "ChatGPT needs a decision" : "ChatGPT has a question";
-                ShowMessage(title, "Open Human Tool Call to respond.", ToolTipIcon.Info);
+                string title = interaction.kind == "choosePath" ? "ChatGPT needs a decision" : "ChatGPT has a question";
+                ShowMessage(title, "Open HumanToolCall to respond.", ToolTipIcon.Info);
             }
         });
     }
 
-    private void Broker_ProgressAdded(ProgressReportView report)
+    private void brokerProgressAdded(ProgressReportView report)
     {
         if (!_config.NotifyOnProgressReports)
         {
             return;
         }
 
-        DispatchToUi(() => ShowMessage("ChatGPT progress", report.Summary, ToolTipIcon.Info));
+        DispatchToUi(() => ShowMessage("ChatGPT progress", report.summary, ToolTipIcon.Info));
     }
 
     private void DispatchToUi(Action action)
@@ -283,7 +285,8 @@ internal sealed class TrayApplicationContext : ApplicationContext
         _stopTunnelItem.Enabled = !_busy;
         _statusItem.Enabled = !_busy;
 
-        string tooltip = $"Human Tool Call - Backend {(_backend.IsRunning ? "On" : "Off")} - {_tunnelStateItem.Text} - Pending {_broker.PendingCount}";
+        string tooltip =
+            $"HumanToolCall - Backend {(_backend.IsRunning ? "On" : "Off")} - {_tunnelStateItem.Text} - Pending {_broker.PendingCount}";
         _trayIcon.Text = tooltip.Length <= 63 ? tooltip : tooltip[..63];
     }
 
@@ -312,8 +315,8 @@ internal sealed class TrayApplicationContext : ApplicationContext
 
     protected override void ExitThreadCore()
     {
-        _broker.InteractionAdded -= Broker_InteractionAdded;
-        _broker.ProgressAdded -= Broker_ProgressAdded;
+        _broker.interactionAdded -= brokerInteractionAdded;
+        _broker.progressAdded -= brokerProgressAdded;
         _trayIcon.Visible = false;
         _trayIcon.Dispose();
         _menu.Dispose();

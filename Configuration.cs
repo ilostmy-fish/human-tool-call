@@ -53,9 +53,7 @@ internal sealed class BackendConfig
     public int Port { get; set; } = 64500;
     public string McpPath { get; set; } = "/mcp";
     public int InteractionTimeoutSeconds { get; set; } = 600;
-    public int BrowserLongPollSeconds { get; set; } = 25;
     public int MaxPendingInteractions { get; set; } = 16;
-    public int MaxQuestionsPerInteraction { get; set; } = 20;
     public int MaxRecentProgressReports { get; set; } = 20;
 }
 
@@ -72,11 +70,9 @@ internal sealed class TunnelConfig
     public string ControlPlaneApiKeyFile { get; set; } = @"C:\tools\tunnel-client\control-plane-api-key.dpapi";
     public string ControlPlaneApiKeyEnvironmentVariable { get; set; } = "CONTROL_PLANE_API_KEY";
 
-    [JsonIgnore]
-    public string HealthListenAddress => $"{HealthHost}:{HealthPort}";
+    [JsonIgnore] public string HealthListenAddress => $"{HealthHost}:{HealthPort}";
 
-    [JsonIgnore]
-    public string HealthUrl => $"http://{HealthListenAddress}/healthz";
+    [JsonIgnore] public string HealthUrl => $"http://{HealthListenAddress}/healthz";
 }
 
 internal static class ConfigLoader
@@ -117,7 +113,8 @@ internal static class ConfigLoader
 
         if (!string.Equals(config.Backend.Host, "127.0.0.1", StringComparison.Ordinal))
         {
-            throw new InvalidDataException("backend.host must be 127.0.0.1. Human Tool Call intentionally binds only to loopback.");
+            throw new InvalidDataException(
+                "backend.host must be 127.0.0.1. HumanToolCall intentionally binds only to loopback.");
         }
 
         ValidatePort(config.Backend.Port, "backend.port");
@@ -137,19 +134,9 @@ internal static class ConfigLoader
             throw new InvalidDataException("backend.interactionTimeoutSeconds must be at least 15.");
         }
 
-        if (config.Backend.BrowserLongPollSeconds is < 5 or > 55)
-        {
-            throw new InvalidDataException("backend.browserLongPollSeconds must be between 5 and 55.");
-        }
-
         if (config.Backend.MaxPendingInteractions is < 1 or > 128)
         {
             throw new InvalidDataException("backend.maxPendingInteractions must be between 1 and 128.");
-        }
-
-        if (config.Backend.MaxQuestionsPerInteraction is < 1 or > 100)
-        {
-            throw new InvalidDataException("backend.maxQuestionsPerInteraction must be between 1 and 100.");
         }
 
         if (config.Backend.MaxRecentProgressReports is < 1 or > 200)
@@ -169,11 +156,13 @@ internal static class ConfigLoader
 
         string configDirectory = Path.GetDirectoryName(configPath) ?? AppContext.BaseDirectory;
         config.Tunnel.ExecutablePath = ResolveConfiguredPath(config.Tunnel.ExecutablePath, configDirectory);
-        config.Tunnel.ControlPlaneApiKeyFile = ResolveConfiguredPath(config.Tunnel.ControlPlaneApiKeyFile, configDirectory);
+        config.Tunnel.ControlPlaneApiKeyFile =
+            ResolveConfiguredPath(config.Tunnel.ControlPlaneApiKeyFile, configDirectory);
 
         if (config.StartTunnelOnLaunch && !config.StartBackendOnLaunch)
         {
-            throw new InvalidDataException("startTunnelOnLaunch requires startBackendOnLaunch because this tunnel targets the local MCP backend.");
+            throw new InvalidDataException(
+                "startTunnelOnLaunch requires startBackendOnLaunch because this tunnel targets the local MCP backend.");
         }
     }
 
