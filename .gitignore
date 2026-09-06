@@ -9,3 +9,4 @@ publish/
 human-tool-call.json
 *.dpapi
 agentsDoNotInteract/
+artifacts/
